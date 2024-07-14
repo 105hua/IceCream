@@ -1,0 +1,4 @@
+name: IceCream
+version: '${version}'
+main: com.nearvanilla.icecream.IceCream
+api-version: '1.20'
