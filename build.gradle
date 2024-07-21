@@ -1,5 +1,7 @@
 plugins {
     id 'java'
+    id 'io.github.goooler.shadow' version '8.1.8' // Use goooler's shadow plugin as it is more up to date than johnrengelman's as of current.
+    id 'com.diffplug.spotless' version '6.25.0'
 }
 
 group = 'com.nearvanilla'
@@ -18,7 +20,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly "io.papermc.paper:paper-api:1.20.6-R0.1-SNAPSHOT"
+    compileOnly "io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT"
 }
 
 def targetJavaVersion = 21
@@ -45,5 +47,26 @@ processResources {
     filteringCharset 'UTF-8'
     filesMatching('plugin.yml') {
         expand props
+    }
+}
+
+tasks.shadowJar {
+    enableRelocation = true
+    relocationPrefix = "${rootProject.property("group")}.${rootProject.property("name").toString().toLowerCase()}.lib"
+    minimize()
+    archiveClassifier = ""
+}
+
+tasks.build {
+    dependsOn shadowJar
+}
+
+spotless{
+    java {
+        importOrder()
+        removeUnusedImports()
+        googleJavaFormat()
+        formatAnnotations()
+        licenseHeader("/* Licensed under GNU Affero General Public License v3.0 */")
     }
 }

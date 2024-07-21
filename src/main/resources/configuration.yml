@@ -1,0 +1,6 @@
+modules:
+  world-tour: true # The world tour module adds commands which streamline some of the processes of the world tour.
+  lightning: true # Nothing to see here, move along...
+module-settings:
+  lightning:
+    strike-sender-chance: 0.1 # The chance that a player will be struck by lightning when they send a message (E.G. 0.1 = 10%)

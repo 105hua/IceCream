@@ -2,3 +2,16 @@ name: IceCream
 version: '${version}'
 main: com.nearvanilla.icecream.IceCream
 api-version: '1.20'
+commands:
+  module:
+    description: A command to manage the IceCream module.
+    usage: /module <enable|disable> # TODO Add reload option.
+    permission: icecream.module
+  lightning:
+    description: A command to strike lightning at a player.
+    usage: /lightning <player>
+    permission: icecream.lightning
+  tour:
+    description: A command to teleport to a tour location.
+    usage: /tour <location>
+    permission: icecream.tour
