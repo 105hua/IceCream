@@ -67,4 +67,7 @@ gradle-app.setting
 # Java heap dump
 *.hprof
 
+# .idea folder
+.idea/
+
 # End of https://www.gitignore.io/api/java,kotlin,gradle
