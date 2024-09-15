@@ -1,5 +1,7 @@
 plugins {
     id 'java'
+    id 'com.diffplug.spotless' version '7.0.0.BETA2'
+    id 'com.gradleup.shadow' version '8.3.1'
 }
 
 group = 'com.nearvanilla'
@@ -19,6 +21,9 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
+    implementation("org.incendo:cloud-paper:2.0.0-beta.10")
+    implementation("org.incendo:cloud-annotations:2.0.0")
+    annotationProcessor("org.incendo:cloud-processor:2.0.0")
 }
 
 def targetJavaVersion = 21
@@ -46,4 +51,30 @@ processResources {
     filesMatching('plugin.yml') {
         expand props
     }
+}
+
+spotless{
+    format("misc"){
+        target '**/*.gradle', '**/*.md'
+        trimTrailingWhitespace()
+        indentWithSpaces(4)
+    }
+    java{
+        importOrder()
+        cleanthat()
+        googleJavaFormat() // Remove Unused Imports conflicts with Google Java Format.
+        formatAnnotations()
+        licenseHeader '/* Licensed under the GNU Affero General Public License. */'
+    }
+}
+
+tasks.shadowJar{
+    enableRelocation = true
+    relocationPrefix = "${rootProject.property('group')}.${rootProject.property('name').toString().toLowerCase()}.lib"
+    minimize()
+    archiveClassifier.set("")
+}
+
+tasks.build{
+    dependsOn("shadowJar")
 }
