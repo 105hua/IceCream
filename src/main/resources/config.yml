@@ -1,0 +1,6 @@
+modules:
+  lightning:
+    enabled: true
+    strike-chance: 10 # Chance of lightning striking the command sender when they die. 10 = 10%. 100 = 100%.
+  mutedeaths:
+    enabled: true
