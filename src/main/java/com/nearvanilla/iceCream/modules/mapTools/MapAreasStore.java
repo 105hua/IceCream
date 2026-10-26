@@ -9,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +17,9 @@ import java.util.Map;
  * Holds the drawn areas and persists them to a JSON file in the plugin data folder. squaremap does
  * not persist markers added through its API, so this file is the source of truth and the map layer
  * is rebuilt from it on startup.
+ *
+ * <p>Thread-safe: on Folia, players in different regions change areas at the same time. Changes and
+ * saves take one lock, and readers get an unchanging copy of the areas.
  *
  * @author Dynant
  * @version 1.0
@@ -33,7 +35,8 @@ public class MapAreasStore {
    * #RECT} keeps its four corners square, a {@value #POLYGON} has free points, a {@value #CIRCLE}
    * is defined by its {@code center} and {@code radius}, and a {@value #MARKER} is a single spot at
    * its {@code center} shown with an {@code icon}. Circle and marker points are built from the
-   * center when loading and are not written to disk.
+   * center when loading and are not written to disk. A {@code hidden} area is not drawn or clicked
+   * in edit mode.
    */
   public record MapArea(
       String id,
@@ -47,11 +50,15 @@ public class MapAreasStore {
       MapPoint center,
       Double radius,
       Double opacity,
-      String icon) {
+      String icon,
+      Boolean hidden) {
 
     public MapArea {
       // Older or hand-edited files may leave owners out.
       owners = owners == null ? List.of() : owners;
+      // The stored form is a lowercase hex code or color name; unparseable colors stay as they are.
+      String normalized = MapToolsUtils.normalizeColor(color);
+      color = normalized != null ? normalized : color;
     }
 
     public static final String RECT = "rect";
@@ -61,6 +68,11 @@ public class MapAreasStore {
 
     public boolean isCircle() {
       return CIRCLE.equals(shape);
+    }
+
+    /** Whether the area is left out of edit mode, so it does not get in the way or get clicked. */
+    public boolean isHidden() {
+      return Boolean.TRUE.equals(hidden);
     }
 
     public boolean isMarker() {
@@ -80,7 +92,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     public MapArea withLabel(String label) {
@@ -96,7 +109,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     public MapArea withDescription(String description) {
@@ -112,7 +126,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     public MapArea withOwners(List<String> owners) {
@@ -128,7 +143,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     public MapArea withColor(String color) {
@@ -144,7 +160,28 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
+    }
+
+    /**
+     * @param hidden whether to leave the area out of edit mode; stored only when true
+     */
+    public MapArea withHidden(boolean hidden) {
+      return new MapArea(
+          id,
+          world,
+          points,
+          label,
+          description,
+          owners,
+          color,
+          shape,
+          center,
+          radius,
+          opacity,
+          icon,
+          hidden ? true : null);
     }
 
     /**
@@ -163,7 +200,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     public MapArea withGeometry(AreaGeometry geometry) {
@@ -179,7 +217,8 @@ public class MapAreasStore {
           geometry.center(),
           geometry.radius(),
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     /**
@@ -198,7 +237,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     /** Circles and markers are saved without points; rebuild them from the center. */
@@ -223,7 +263,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
 
     /** The area as written to disk: circles and markers leave out their points. */
@@ -241,7 +282,8 @@ public class MapAreasStore {
           center,
           radius,
           opacity,
-          icon);
+          icon,
+          hidden);
     }
   }
 
@@ -273,7 +315,11 @@ public class MapAreasStore {
   private static final int VERSION = 1;
 
   private final File file;
+  private final Object lock = new Object();
   private final Map<String, MapArea> areas = new LinkedHashMap<>();
+
+  /** A copy of the areas for readers, replaced after every change. */
+  private volatile List<MapArea> snapshot = List.of();
 
   /** When the file was last loaded or written by this store; a different time means a hand edit. */
   private long knownModified;
@@ -290,6 +336,13 @@ public class MapAreasStore {
    * @throws IllegalStateException if the file was written by a newer version of the plugin
    */
   public void load() throws IOException {
+    synchronized (lock) {
+      loadLocked();
+      snapshot = List.copyOf(areas.values());
+    }
+  }
+
+  private void loadLocked() throws IOException {
     areas.clear();
     if (!file.exists()) return;
 
@@ -315,6 +368,12 @@ public class MapAreasStore {
    * hand since it was loaded or saved may be broken, so it does not replace the backup.
    */
   public void save() {
+    synchronized (lock) {
+      saveLocked();
+    }
+  }
+
+  private void saveLocked() {
     try {
       file.getParentFile().mkdirs();
       File temporary = new File(file.getParentFile(), file.getName() + ".tmp");
@@ -343,28 +402,45 @@ public class MapAreasStore {
   }
 
   public MapArea getArea(String id) {
-    return areas.get(id);
+    synchronized (lock) {
+      return areas.get(id);
+    }
   }
 
+  /**
+   * @return the areas at the time of the call; later changes do not show up in it
+   */
   public Collection<MapArea> getAreas() {
-    return Collections.unmodifiableCollection(areas.values());
+    return snapshot;
   }
 
   public void putArea(MapArea area) {
-    areas.put(area.id(), area);
-    save();
+    synchronized (lock) {
+      areas.put(area.id(), area);
+      changed();
+    }
   }
 
   /** Replaces an area under a new id, saving once so the file never holds both or neither. */
   public void renameArea(String oldId, MapArea area) {
-    areas.remove(oldId);
-    areas.put(area.id(), area);
-    save();
+    synchronized (lock) {
+      areas.remove(oldId);
+      areas.put(area.id(), area);
+      changed();
+    }
   }
 
   public MapArea removeArea(String id) {
-    MapArea removed = areas.remove(id);
-    if (removed != null) save();
-    return removed;
+    synchronized (lock) {
+      MapArea removed = areas.remove(id);
+      if (removed != null) changed();
+      return removed;
+    }
+  }
+
+  /** Publishes the new areas to readers and writes them to disk. Call while holding the lock. */
+  private void changed() {
+    snapshot = List.copyOf(areas.values());
+    saveLocked();
   }
 }
